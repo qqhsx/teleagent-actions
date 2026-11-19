@@ -1,0 +1,46 @@
+name: TeleAgent 云电脑保活
+
+on:
+  schedule:
+    # 每 15 分钟一轮（UTC）。休眠阈值约 1 小时，即使高峰延迟 5-15 分钟也稳。
+    # 私有仓库免费额度 2000 分钟/月，*/15 约 1440 分钟/月，留有余量。
+    - cron: '*/15 * * * *'
+  workflow_dispatch: # 允许手动触发，用于首次验证
+
+# 防止上一轮没跑完就并发触发
+concurrency:
+  group: teleagent-keepalive
+  cancel-in-progress: false
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 恢复 JWT 缓存
+        uses: actions/cache@v4
+        with:
+          # 只缓存 jwt.txt；密码不落盘、不入缓存
+          path: teleagent-actions/data/jwt.txt
+          # 滚动 key：每轮用当前 run_id 建新条目，保存重登后的新 JWT
+          key: teleagent-jwt-v1-${{ github.run_id }}
+          # 前缀匹配恢复最近一次运行保存的 JWT（含最新凭据）
+          restore-keys: |
+            teleagent-jwt-v1-
+
+      - name: 执行一轮保活
+        working-directory: teleagent-actions
+        env:
+          TA_ACCOUNT: ${{ secrets.TA_ACCOUNT }}
+          TA_PASSWORD: ${{ secrets.TA_PASSWORD }}
+        run: node actions-keepalive.js
+        # 缓存由 actions/cache 在 job 成功结束时自动保存：
+        # 本轮若重登更新了 jwt.txt，新 JWT 会写入新的 run_id 缓存条目。
