@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登录 · TeleAgent 保活控制台</title>
+<style>
+:root{
+  --bg:#0b1220;--card:#121a2b;--line:#223046;--txt:#e2e8f0;--sub:#8fa3c0;
+  --ok:#34d399;--err:#f87171;--blue:#2563eb;--blue2:#3b82f6;--cyan:#22d3ee;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font:14px/1.6 "Segoe UI","Microsoft YaHei",system-ui;
+  min-height:100vh;display:flex;align-items:center;justify-content:center;
+  background-image:radial-gradient(1200px 600px at 70% -10%,rgba(37,99,235,.16),transparent),
+    radial-gradient(900px 500px at -10% 110%,rgba(34,211,238,.10),transparent)}
+.box{width:340px;background:var(--card);border:1px solid var(--line);border-radius:14px;
+  padding:26px 24px;box-shadow:0 20px 60px rgba(0,0,0,.45)}
+.logo{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.logo .dot{width:10px;height:10px;border-radius:50%;background:var(--ok);box-shadow:0 0 12px var(--ok)}
+.logo h1{font-size:17px;font-weight:700}
+.tag{color:var(--sub);font-size:12px;margin-bottom:18px}
+label{display:block;color:var(--sub);font-size:12px;margin:10px 0 4px}
+input{width:100%;background:#0d1526;border:1px solid var(--line);color:var(--txt);
+  border-radius:8px;padding:9px 12px;font-size:14px;outline:none;transition:border-color .15s}
+input:focus{border-color:var(--blue2)}
+button{width:100%;margin-top:18px;background:var(--blue);border:1px solid var(--blue2);color:#fff;
+  border-radius:8px;padding:10px 0;font-size:14px;font-weight:600;cursor:pointer;transition:background .15s}
+button:hover{background:var(--blue2)}
+button:disabled{opacity:.55;cursor:wait}
+.err{display:none;margin-top:12px;background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.35);
+  color:var(--err);border-radius:8px;padding:8px 12px;font-size:13px}
+.shake{animation:shake .35s}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+.foot{margin-top:16px;color:var(--sub);font-size:11px;text-align:center;line-height:1.8}
+hr{border:none;border-top:1px dashed var(--line);margin:14px 0}
+.cred{background:#0d1526;border:1px solid var(--line);border-radius:8px;padding:8px 10px;
+  font:12px/1.6 Consolas,monospace;color:var(--sub);display:flex;justify-content:space-between;gap:8px}
+.cred b{color:var(--cyan);font-weight:600}
+</style>
+</head>
+<body>
+<div class="box" id="box">
+  <div class="logo"><span class="dot"></span><h1>TeleAgent 保活控制台</h1></div>
+  <div class="tag">面板访问密码</div>
+  <form id="f" autocomplete="on">
+    <label for="u">用户名</label>
+    <input id="u" name="u" autocomplete="username" required>
+    <label for="p">密码</label>
+    <input id="p" type="password" name="p" autocomplete="current-password" required>
+    <button type="submit" id="go">登录</button>
+    <div class="err" id="err"></div>
+  </form>
+  <div id="hint" style="display:none">
+    <hr>
+    <div class="cred"><span>用户名</span><b id="hu">admin</b></div>
+    <div class="foot">登录会话 7 天有效，期间访问免重复输入</div>
+  </div>
+</div>
+<script>
+// 会话 Cookie 登录：POST 账号密码 → 服务端签发 HttpOnly Cookie → 跳转首页
+async function login(u, p) {
+  const r = await fetch('/api/panel/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ user: u, password: p }),
+  });
+  return r;
+}
+const f = document.getElementById('f');
+f.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const u = document.getElementById('u').value.trim();
+  const p = document.getElementById('p').value;
+  if (!u || !p) return;
+  const go = document.getElementById('go');
+  go.disabled = true; go.textContent = '验证中…';
+  const err = document.getElementById('err');
+  err.style.display = 'none';
+  try {
+    const r = await login(u, p);
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) { location.href = '/'; return; }
+    err.textContent = j.error || (r.status === 401 ? '用户名或密码不对' : '服务异常（HTTP ' + r.status + '）');
+    err.style.display = 'block';
+    document.getElementById('box').classList.add('shake');
+    setTimeout(() => document.getElementById('box').classList.remove('shake'), 400);
+  } catch (e2) {
+    err.textContent = '连接失败：' + e2.message;
+    err.style.display = 'block';
+  }
+  document.getElementById('p').value = '';
+  go.disabled = false; go.textContent = '登录';
+});
+// 提示区：有 hint 查询参数时显示（用户名由服务端 302 时附带）
+if (location.search.includes('hint=1')) {
+  document.getElementById('hint').style.display = '';
+  document.getElementById('hu').textContent = new URLSearchParams(location.search).get('user') || 'admin';
+}
+</script>
+</body>
+</html>
