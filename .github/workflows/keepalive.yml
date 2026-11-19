@@ -29,7 +29,7 @@ jobs:
         uses: actions/cache@v4
         with:
           # 只缓存 jwt.txt；密码不落盘、不入缓存
-          path: teleagent-actions/data/jwt.txt
+          path: data/jwt.txt
           # 滚动 key：每轮用当前 run_id 建新条目，保存重登后的新 JWT
           key: teleagent-jwt-v1-${{ github.run_id }}
           # 前缀匹配恢复最近一次运行保存的 JWT（含最新凭据）
@@ -37,7 +37,6 @@ jobs:
             teleagent-jwt-v1-
 
       - name: 执行一轮保活
-        working-directory: teleagent-actions
         env:
           TA_ACCOUNT: ${{ secrets.TA_ACCOUNT }}
           TA_PASSWORD: ${{ secrets.TA_PASSWORD }}
