@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TeleAgent 保活控制台</title>
+<style>
+:root{
+  --bg:#0b1220;--card:#121a2b;--card2:#0e1626;--line:#223046;--txt:#e2e8f0;--sub:#8fa3c0;
+  --ok:#34d399;--warn:#fbbf24;--err:#f87171;--blue:#60a5fa;--violet:#a78bfa;--cyan:#22d3ee;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font:14px/1.6 "Segoe UI","Microsoft YaHei",system-ui;
+  min-height:100vh;padding:20px}
+.wrap{max-width:1080px;margin:0 auto}
+h1{font-size:20px;font-weight:700;display:flex;align-items:center;gap:10px}
+h1 .dot{width:10px;height:10px;border-radius:50%;background:var(--ok);box-shadow:0 0 12px var(--ok)}
+.sub{color:var(--sub);font-size:12px;margin:4px 0 18px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;position:relative}
+.card h2{font-size:13px;color:var(--sub);font-weight:600;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}
+.big{font-size:26px;font-weight:700;margin:2px 0 4px}
+.row{display:flex;justify-content:space-between;padding:3px 0;font-size:13px}
+.row b{color:var(--txt);font-weight:600}.row span{color:var(--sub)}
+.pill{display:inline-block;padding:2px 10px;border-radius:99px;font-size:11px;font-weight:600}
+.p-ok{background:rgba(52,211,153,.15);color:var(--ok)}
+.p-warn{background:rgba(251,191,36,.15);color:var(--warn)}
+.p-err{background:rgba(248,113,113,.15);color:var(--err)}
+.p-off{background:rgba(143,163,192,.15);color:var(--sub)}
+.btn{background:#1c2a44;border:1px solid #2e4166;color:var(--txt);border-radius:8px;padding:6px 14px;
+  font-size:12px;cursor:pointer;transition:.15s}
+.btn:hover{background:#26375a}
+.btn.primary{background:#2563eb;border-color:#3b82f6}
+.btn.primary:hover{background:#3b82f6}
+.btn.danger{background:#7f1d1d;border-color:#b91c1c}
+.btn.danger:hover{background:#991b1b}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.logs{background:var(--card2);border:1px solid var(--line);border-radius:12px;margin-top:14px;padding:14px;max-height:300px;overflow:auto}
+.logs h2{font-size:13px;color:var(--sub);margin-bottom:8px}
+.logline{font:12px/1.7 Consolas,monospace;padding:1px 0;color:var(--sub)}
+.logline .t{color:#5b6f8f}
+.logline.info .m{color:var(--txt)}
+.logline.warning .m{color:var(--warn)}
+.logline.error .m{color:var(--err)}
+.bar{height:6px;background:#1e2a44;border-radius:4px;overflow:hidden;margin:6px 0 2px}
+.bar i{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,var(--blue),var(--cyan))}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:50}
+.modal.on{display:flex}
+.mbox{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px;width:360px}
+.mbox h3{margin-bottom:10px}
+.mbox p{color:var(--sub);font-size:13px;margin-bottom:16px}
+.mfoot{display:flex;justify-content:flex-end;gap:8px}
+input[type=time]{background:#0d1526;border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:4px 8px}
+input[type=number]{background:#0d1526;border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:4px 8px;width:88px}
+select{background:#0d1526;border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:4px 6px;font-size:12px}
+.planbox{margin-top:10px;border-top:1px dashed var(--line);padding-top:8px}
+.planbox label{font-size:12px;color:var(--sub);display:flex;align-items:center;gap:6px}
+.planrow{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px}
+.inp{background:#0d1526;border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:5px 8px;font-size:13px;width:100%;margin:3px 0}
+.toast{position:fixed;top:18px;right:18px;background:#152238;border:1px solid var(--line);border-left:3px solid var(--ok);
+  border-radius:8px;padding:10px 16px;font-size:13px;display:none;z-index:60}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><span class="dot"></span>TeleAgent 保活控制台</h1>
+  <div class="sub">会话心跳 · 每日积分 · 电源管理 · 机器状态</div>
+
+  <div class="grid">
+    <!-- 实例保活 -->
+    <div class="card">
+      <h2>🔌 实例保活 <span id="ka-state" class="pill p-off">未启动</span></h2>
+      <div class="big" id="ka-uptime">--</div>
+      <div class="row"><span>实例 ID</span><b id="ka-id" style="font-size:11px">--</b></div>
+      <div class="row"><span>上次活跃</span><b id="ka-last">--</b></div>
+      <div class="row"><span>换票轮数</span><b id="ka-hb">--</b></div>
+      <div class="row"><span>心跳信号</span><b id="ka-heart">--</b></div>
+      <div class="row"><span>自愈次数</span><b id="ka-heal">--</b></div>
+      <div class="actions">
+        <button class="btn primary" id="ka-open">🚀 打开云电脑</button>
+        <button class="btn" id="ka-toggle">暂停/恢复</button>
+        <button class="btn" id="ka-reconnect">立即保活</button>
+      </div>
+      <div class="planbox">
+        <label>保活间隔（秒）</label>
+        <div class="planrow">
+          <input type="number" id="cfg-refresh" min="60" step="30">
+          <button class="btn" id="ka-refresh-save">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 签到积分 -->
+    <div class="card">
+      <h2>🎁 签到积分 <span id="pt-claimed" class="pill p-off">--</span></h2>
+      <div class="big" id="pt-balance">-- 积分</div>
+      <div class="row"><span>套餐</span><b id="pt-plan">--</b></div>
+      <div class="row"><span>下次自动领取</span><b id="pt-next">--</b></div>
+      <div class="actions">
+        <button class="btn primary" id="pt-claim">立即领取</button>
+        <button class="btn" id="pt-refresh">刷新状态</button>
+      </div>
+      <div class="planbox">
+        <label>每日领取时间</label>
+        <div class="planrow">
+          <input type="time" id="cfg-time">
+          <button class="btn" id="pt-time-save">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 电源管理 -->
+    <div class="card">
+      <h2>⚡ 电源管理</h2>
+      <div class="row"><span>平台服务</span><b id="pw-service">--</b></div>
+      <div class="row"><span>重启计划</span><b id="pw-plan">无</b></div>
+      <div class="actions">
+        <button class="btn danger" id="pw-restart">重启云电脑</button>
+        <button class="btn danger" id="pw-rebuild">重置云电脑服务</button>
+        <button class="btn" id="pw-queue-cancel" style="display:none">取消排队</button>
+      </div>
+      <div class="planbox" id="pw-plan-box">
+        <label><input type="checkbox" id="pw-plan-on"> 定时重启计划</label>
+        <div class="planrow">
+          <select id="pw-plan-mode">
+            <option value="daily">每日</option>
+            <option value="weekly">每周</option>
+          </select>
+          <select id="pw-plan-day">
+            <option value="0">周日</option><option value="1">周一</option><option value="2">周二</option>
+            <option value="3">周三</option><option value="4">周四</option><option value="5">周五</option>
+            <option value="6">周六</option>
+          </select>
+          <input type="time" id="pw-plan-time">
+          <button class="btn" id="pw-plan-save">保存计划</button>
+        </div>
+        <div class="row" id="pw-plan-hint" style="display:none"><span>提示</span><b>未登录：定时计划需登录后走平台接口</b></div>
+      </div>
+    </div>
+
+    <!-- 部署机状态 -->
+    <div class="card">
+      <h2>🖥️ 部署机状态 <span id="sy-scope" class="pill p-off" style="font-size:10px">本机</span></h2>
+      <div class="row"><span>主机名</span><b id="sy-host">--</b></div>
+      <div class="row"><span>系统</span><b id="sy-os">--</b></div>
+      <div class="row"><span>运行时长</span><b id="sy-uptime">--</b></div>
+      <div class="row"><span>CPU</span><b id="sy-cpu">--%</b></div>
+      <div class="bar"><i id="sy-cpu-bar" style="width:0"></i></div>
+      <div class="row"><span>内存</span><b id="sy-mem">--</b></div>
+      <div class="bar"><i id="sy-mem-bar" style="width:0;background:linear-gradient(90deg,var(--violet),#f472b6)"></i></div>
+      <div class="sub" style="margin-top:6px">本卡片为工具所在机器（部署机）自身状态；云电脑状态看「实例保活」卡片</div>
+    </div>
+
+    <!-- 账号登录 -->
+    <div class="card">
+      <h2>🔑 账号登录 <span id="lg-pill" class="pill p-off">--</span></h2>
+      <div class="row"><span>当前凭据</span><b id="lg-source">--</b></div>
+      <div class="row"><span>凭据有效期</span><b id="lg-days">--</b></div>
+      <div class="row"><span>已存账号</span><b id="lg-account">--</b></div>
+      <div class="row"><span>自动续期</span><b id="lg-auto">--</b></div>
+      <div id="lg-pwd-box">
+        <input type="text" class="inp" id="lg-user" placeholder="用户名" autocomplete="off">
+      <input type="password" class="inp" id="lg-pass" placeholder="密码" autocomplete="new-password">
+      <label style="font-size:12px;color:var(--sub);display:flex;align-items:center;gap:6px;margin:4px 0">
+        <input type="checkbox" id="lg-remember" checked> 记住密码（登录态快过期时自动重登）
+      </label>
+      <div class="actions">
+        <button class="btn primary" id="lg-login">登录获取凭据</button>
+        <button class="btn" id="lg-relogin">立即续期</button>
+        <button class="btn" id="lg-logout">清除登录</button>
+      </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 日志 -->
+  <div class="logs">
+    <h2>📜 活动日志</h2>
+    <div id="logs"></div>
+  </div>
+
+  <div class="sub" style="margin-top:14px">
+    企微 webhook：<input type="text" id="cfg-webhook" placeholder="https://qyapi.weixin.qq.com/..." style="width:220px;background:#0d1526;border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:4px 8px"> <button class="btn" id="cfg-notify-save">保存通知</button>
+  </div>
+</div>
+
+<div class="modal" id="confirm">
+  <div class="mbox">
+    <h3 id="cf-title">确认操作</h3>
+    <p id="cf-text"></p>
+    <div class="mfoot">
+      <button class="btn" id="cf-no">取消</button>
+      <button class="btn danger" id="cf-yes">确认执行</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let S = null;
+
+async function poll() {
+  try {
+    const r = await fetch('/api/status');
+    S = await r.json();
+    render();
+  } catch (e) {
+    // 不要把渲染异常吞掉：控制台留痕，界面保持上一次状态继续轮询
+    console.error('[render]', e);
+  }
+}
+setInterval(poll, 3000);
+poll();
+setInterval(loadLogs, 5000);
+loadLogs();
+
+function render() {
+  const { auth, keepalive: ka, points: pt, power: pw, system: sy, scheduler: sc } = S;
+  // 保活
+  const pill = $('ka-state');
+  const map = { online:['p-ok','保活中'], starting:['p-warn','启动中'], healing:['p-warn','自愈中'], error:['p-err','异常'], off:['p-off','已停'] };
+  const [cls, txt] = map[ka.state] || ['p-off', ka.state];
+  pill.className = 'pill ' + cls; pill.textContent = txt;
+  $('ka-uptime').textContent = ka.instance_status_text || (ka.state === 'online' ? '运行中' : '--');
+  // 云电脑详情（instance API 返回，字段有则显示）
+  const info = ka.instance_info || {};
+  $('ka-id').textContent = ka.instance_id || '--';
+  $('ka-hb').textContent = ka.cycles != null ? ka.cycles + ' 轮' : '--';
+  $('ka-heart').textContent = ka.heartbeats != null ? `${ka.heartbeats} 轮（refresh+heartbeat）` : '--';
+  $('ka-heal').textContent = ka.healed != null ? ka.healed + ' 次' : '--';
+  $('ka-last').textContent = ka.last_ticket_text || '--';
+  // 积分
+  $('pt-balance').textContent = pt.balance != null ? pt.balance + ' 积分' : (pt.error ? '获取失败' : '--');
+  $('pt-plan').textContent = pt.plan || '--';
+  $('pt-next').textContent = sc.next_claim_text || '--';
+  const cp = $('pt-claimed');
+  if (sc.claiming) { cp.className='pill p-warn'; cp.textContent='领取中…'; }
+  else if (sc.last_claim_date === todayCN()) { cp.className='pill p-ok'; cp.textContent='今日已领'; }
+  else { cp.className='pill p-warn'; cp.textContent='待领取'; }
+  // 电源
+  $('pw-restart').disabled = !auth.ok;
+  $('pw-rebuild').disabled = !auth.ok;
+  // 平台服务状态
+  const ss = (ka.service_status || {});
+  $('pw-service').textContent = ss.ok
+    ? '正常' + (ss.data ? '' : '')
+    : (ss.error ? '异常：' + ss.error.slice(0, 40) : '--');
+  $('pw-service').style.color = ss.ok ? 'var(--ok)' : (ss.error ? 'var(--err)' : '');
+  // 排队中显示「取消排队」
+  const queued = ka.instance_status === 5;
+  $('pw-queue-cancel').style.display = queued ? 'inline-block' : 'none';
+  $('pw-queue-cancel').disabled = !auth.ok;
+  const plan = pw.restart_plan || { enabled: false, mode: 'daily', time: '04:30', weekday: 0 };
+  $('pw-plan').textContent = pw.restart_plan_text || '无';
+  // 计划控件（编辑中不覆盖；未登录时禁用）
+  const planBox = $('pw-plan-box');
+  const editing = document.activeElement && planBox.contains(document.activeElement);
+  const planLocked = !auth.ok;
+  $('pw-plan-hint').style.display = planLocked ? 'flex' : 'none';
+  ['pw-plan-on', 'pw-plan-mode', 'pw-plan-day', 'pw-plan-time', 'pw-plan-save'].forEach((id) => { $(id).disabled = planLocked; });
+  if (!editing) {
+    $('pw-plan-on').checked = !!plan.enabled;
+    $('pw-plan-mode').value = plan.mode;
+    $('pw-plan-day').value = String(plan.weekday);
+    if (!$("pw-plan-time").value) $('pw-plan-time').value = plan.time;
+  }
+  $('pw-plan-day').style.display = $('pw-plan-mode').value === 'weekly' ? '' : 'none';
+  // 机器
+  $('sy-uptime').textContent = sy.uptime_text || '--';
+  $('sy-cpu').textContent = (sy.cpu_pct != null ? sy.cpu_pct : '--') + '%';
+  $('sy-cpu-bar').style.width = (sy.cpu_pct || 0) + '%';
+  $('sy-mem').textContent = (sy.mem_used_gb != null && sy.mem_total_gb != null)
+    ? `${sy.mem_used_gb} / ${sy.mem_total_gb} GB (${sy.mem_pct}%)` : '--';
+  $('sy-mem-bar').style.width = (sy.mem_pct || 0) + '%';
+  $('sy-host').textContent = sy.hostname || '--';
+  $('sy-os').textContent = sy.platform || '--';
+  $('lg-days') && ($('lg-days').textContent = auth.ok ? `${auth.expires_text}（剩 ${auth.days_left} 天）` : (auth.error || '未加载'));
+  const scopeMap = { local: '本机', docker: '容器' };
+  $('sy-scope').textContent = scopeMap[sy.scope] || '本机';
+  // 登录
+  const lp = $('lg-pill');
+  if (auth.ok) { lp.className = 'pill p-ok'; lp.textContent = auth.has_password ? '密码登录' : 'JWT 文件'; }
+  else { lp.className = 'pill p-err'; lp.textContent = '未加载'; }
+  const srcMap = { 'jwt-file': '登录落盘', 'password-login': '账号密码登录', none: '未加载' };
+  $('lg-source').textContent = srcMap[auth.source] || auth.source;
+  $('lg-account').textContent = auth.account_masked || '未保存';
+  $('lg-auto').textContent = auth.relogin_check_text || '未配置';
+  $('lg-relogin').disabled = !auth.has_password;
+  if (!$('cfg-time').value) $('cfg-time').value = sc.claim_time;
+  if (!$('cfg-refresh').value) $('cfg-refresh').value = ka.refresh_sec || 300;
+}
+
+function todayCN() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function ago(iso) {
+  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (s < 60) return Math.floor(s) + ' 秒前';
+  if (s < 3600) return Math.floor(s/60) + ' 分钟前';
+  return Math.floor(s/3600) + ' 小时前';
+}
+
+async function loadLogs() {
+  try {
+    const r = await fetch('/api/logs');
+    const ls = await r.json();
+    $('logs').innerHTML = ls.map((l) =>
+      `<div class="logline ${l.level}"><span class="t">${l.timestamp}</span> <span class="s">[${l.source}]</span> <span class="m">${esc(l.message)}</span></div>`
+    ).join('') || '<div class="logline">暂无日志</div>';
+  } catch {}
+}
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+
+function toast(msg, ok=true) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.style.display = 'block';
+  t.style.borderLeftColor = ok ? 'var(--ok)' : 'var(--err)';
+  setTimeout(() => t.style.display = 'none', 2600);
+}
+async function post(url, body) {
+  const opt = { method: 'POST' };
+  if (body) { opt.headers = { 'content-type': 'application/json' }; opt.body = JSON.stringify(body); }
+  const r = await fetch(url, opt);
+  return r.json().catch(() => ({}));
+}
+
+$('ka-toggle').onclick = async () => toast('保活已切换：' + (await post('/api/keepalive/toggle')).enabled);
+$('ka-reconnect').onclick = async () => { toast('保活轮已触发'); post('/api/keepalive/reconnect'); };
+$('ka-open').onclick = async () => {
+  toast('正在生成云电脑入口…');
+  try {
+    const r = await post('/api/desktop/open');
+    if (r.ok && r.url) {
+      window.open(r.url, '_blank');
+      toast('✅ 已打开云电脑网页端');
+    } else {
+      toast('打开失败：' + (r.error || '未知'), false);
+    }
+  } catch (e) { toast('打开失败：' + e.message, false); }
+};
+$('pt-refresh').onclick = async () => { toast('刷新中…'); await post('/api/points/refresh'); };
+
+$('lg-login').onclick = async () => {
+  const account = $('lg-user').value.trim();
+  const password = $('lg-pass').value;
+  if (!account || !password) return toast('先填账号和密码', false);
+  const btn = $('lg-login');
+  btn.disabled = true; btn.textContent = '登录中（含滑块校验）…';
+  try {
+    const r = await fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ account, password, remember: $('lg-remember').checked }) });
+    const j = await r.json().catch(() => ({}));
+    toast(j.ok ? `✅ 登录成功，凭据有效期至 ${j.expires_text}（剩 ${j.days_left} 天）` : '登录失败：' + (j.error || '未知'), !!j.ok);
+    if (j.ok) { $('lg-pass').value = ''; poll(); }
+  } catch (e) { toast('登录失败：' + e.message, false); }
+  btn.disabled = false; btn.textContent = '登录获取凭据';
+};
+$('lg-relogin').onclick = async () => {
+  const r = await post('/api/auth/relogin');
+  toast(r.ok ? `✅ 已续期，有效期至 ${r.expires_text || ''}` : '续期失败：' + (r.error || '未知'), !!r.ok);
+  poll();
+};
+$('lg-logout').onclick = () => confirmBox('清除登录凭据', '将删除已保存的账号密码与 data/jwt.txt，清除后保活中断，需重新登录恢复。确定继续？', async () => {
+  const r = await post('/api/auth/logout');
+  toast(r.ok ? '已清除登录凭据' : '操作失败', !!r.ok);
+  poll();
+});
+$('pt-claim').onclick = async () => {
+  $('pt-claim').disabled = true;
+  toast('正在领取（API）…');
+  const r = await post('/api/points/claim');
+  $('pt-claim').disabled = false;
+  toast(r.status === 'claimed' ? '✅ 领取成功 +100 积分' : r.status === 'already_claimed' ? '今日已领取过' : '结果：' + (r.status || r.error || '未知'), r.ok);
+};
+
+let cfAction = null;
+function confirmBox(title, text, action) {
+  $('cf-title').textContent = title;
+  $('cf-text').textContent = text;
+  $('confirm').classList.add('on');
+  cfAction = action;
+}
+$('cf-no').onclick = () => { $('confirm').classList.remove('on'); cfAction = null; };
+$('cf-yes').onclick = async () => {
+  $('confirm').classList.remove('on');
+  if (cfAction) await cfAction();
+  cfAction = null;
+};
+$('pw-restart').onclick = () => {
+  confirmBox('重启云电脑', '将与官方「设置 > 恢复与重置 > 重启云电脑」同一动作：不重装、数据不受影响，服务随系统自动启动，预计约 1 分钟。进行中的任务会中断。', async () => {
+    toast('正在下发重启…');
+    const r = await post('/api/power/platform-restart');
+    toast(r.ok ? '🔄 重启已下发，约 1 分钟后恢复' : '重启失败：' + (r.error || '未知'), !!r.ok);
+    poll();
+  });
+};
+$('pw-rebuild').onclick = () => {
+  confirmBox('确认重置云电脑服务？',
+    '将重新安装云电脑服务并恢复运行环境（约 2 分钟）：历史任务、工作空间及个人设置会保留；但系统盘内安装的软件与数据将被清除，进行中的任务会中断。此操作不可中途取消。输入 RESET 之外不会执行。',
+    async () => {
+      const word = prompt('确认重置请输入 RESET（其他内容取消）：');
+      if (word !== 'RESET') return toast('已取消（未输入 RESET）', false);
+      toast('正在下发重置…');
+      const r = await post('/api/power/platform-rebuild?confirm=RESET');
+      toast(r.ok ? '⚠️ 重置已下发（instance/rebuild），约 2 分钟完成' : '重置失败：' + (r.error || '未知'), !!r.ok);
+      poll();
+    });
+};
+$('pw-queue-cancel').onclick = () => confirmBox('取消排队', '云电脑当前在排队中，取消后可稍后重新拉起。确定取消？', async () => {
+  const r = await post('/api/power/platform-cancel');
+  toast(r.ok ? '已取消排队' : '取消失败：' + (r.error || '未知'), !!r.ok);
+  poll();
+});
+$('pw-plan-mode').onchange = () => { $('pw-plan-day').style.display = $('pw-plan-mode').value === 'weekly' ? '' : 'none'; };
+$('pw-plan-save').onclick = async () => {
+  const body = { power: { restart_plan: {
+    enabled: $('pw-plan-on').checked,
+    mode: $('pw-plan-mode').value,
+    weekday: parseInt($('pw-plan-day').value, 10) || 0,
+    time: $('pw-plan-time').value || '04:30',
+  } } };
+  const r = await fetch('/api/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  toast(j.ok ? ($('pw-plan-on').checked ? `✅ 计划已保存：${$('pw-plan-mode').value === 'weekly' ? '每周' + ['日','一','二','三','四','五','六'][parseInt($('pw-plan-day').value,10)] : '每日'} ${$('pw-plan-time').value || '04:30'}` : '已停用定时重启') : '保存失败：' + (j.error || '未知'), !!j.ok);
+  poll();
+};
+$('ka-refresh-save').onclick = async () => {
+  const refresh = parseInt($('cfg-refresh').value || '300', 10);
+  if (!refresh || refresh < 60) return toast('保活间隔不能小于 60 秒', false);
+  const r = await fetch('/api/config', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ keepalive: { refreshSec: refresh } }) });
+  const j = await r.json().catch(() => ({}));
+  toast(j.ok ? `✅ 保活间隔已保存：${refresh} 秒` : '保存失败：' + (j.error || ''), !!j.ok);
+  poll();
+};
+$('pt-time-save').onclick = async () => {
+  const t = $('cfg-time').value;
+  if (!/^\d{2}:\d{2}$/.test(t || '')) return toast('先选一个领取时间', false);
+  const r = await fetch('/api/config', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ points: { claim_time: t } }) });
+  const j = await r.json().catch(() => ({}));
+  toast(j.ok ? `✅ 每日领取时间已保存：${t}` : '保存失败：' + (j.error || ''), !!j.ok);
+  poll();
+};
+$('cfg-notify-save').onclick = async () => {
+  const hook = $('cfg-webhook').value.trim();
+  const r = await fetch('/api/notify', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ enabled: !!hook, wecomWebhook: hook }) });
+  if (r.ok && hook) {
+    const t = await post('/api/notify/test');
+    toast(t.ok ? '✅ 已保存并推送测试消息' : '已保存但测试推送失败：' + (t.error || ''), !!t.ok);
+  } else {
+    toast(r.ok ? '已清空通知配置' : '保存失败', !!r.ok);
+  }
+};
+</script>
+</body>
+</html>
