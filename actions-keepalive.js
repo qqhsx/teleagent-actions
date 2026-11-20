@@ -1,6 +1,6 @@
 // GitHub Actions 专用：一次性保活脚本
-// 复用本仓库已验证的 lib/login.js + lib/keepalive.js，不重复造轮子。
-// 每次运行 = 一轮：加载缓存 JWT → 失效则重登 → 自愈拉起 → 官方心跳 → 换票。
+// 复用本仓库已验证的 lib/login.js + lib/keepalive.js + lib/api.js，不重复造轮子。
+// 每次运行 = 一轮：加载缓存 JWT → 失效则重登 → 自愈拉起 → 官方心跳 → 换票 → 每日积分（幂等）。
 // 凭据来源（GitHub Secrets，经环境变量注入）：
 //   TA_ACCOUNT 手机号/账号
 //   TA_PASSWORD 密码
@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const Login = require('./lib/login');
 const KeepAlive = require('./lib/keepalive');
+const Api = require('./lib/api');
 
 const DATA_DIR = process.env.TA_DATA_DIR || path.join(__dirname, 'data');
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -35,8 +36,74 @@ const config = {
 const login = new Login(DATA_DIR, log);
 const auth = { jwt: null }; // 保活模块只读取 .jwt
 const ka = new KeepAlive(auth, config, log, notifier);
+const api = new Api(auth, config, log); // 积分模块：复用同一个 JWT
+
+const CLAIM_STATE = path.join(DATA_DIR, 'claim-state.json');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function today() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function readClaimState() {
+  try { return JSON.parse(fs.readFileSync(CLAIM_STATE, 'utf8')); } catch { return {}; }
+}
+function writeClaimState(s) {
+  try { fs.writeFileSync(CLAIM_STATE, JSON.stringify(s, null, 2)); } catch (e) {
+    console.warn(`[Points] 状态落盘失败（不影响本轮）：${e.message}`);
+  }
+}
+
+// 每日积分领取：本地日期标记 + 服务端 dayTaskRaw 幂等，双重防重复。
+// 注意：此函数失败绝不影响保活主流程（调用处 try-catch 吞掉）。
+async function maybeClaimPoints() {
+  const state = readClaimState();
+  if (state.last_claim_date === today()) {
+    console.log('[Points] 今日已领取过（本地标记），跳过');
+    return;
+  }
+
+  api.bindToken(auth.jwt);
+
+  // 服务端幂等：先查 checkTask 活动状态
+  let completed = false;
+  try {
+    const dt = await api.dayTaskRaw();
+    const acts = (dt && dt.data && dt.data.activity_data) || [];
+    const task = acts.find((a) => (a.jump_url || '').includes('checkTask'));
+    if (task && task.action_status === 'completed') completed = true;
+  } catch (e) {
+    console.warn(`[Points] 查任务状态失败（${e.message}），直接尝试领取`);
+  }
+
+  if (completed) {
+    console.log('[Points] 服务端显示今日已领取，仅更新本地标记');
+    writeClaimState({ ...state, last_claim_date: today() });
+    return;
+  }
+
+  const r = await api.claimDailyLogin();
+  if (r && (r.code === 200 || r.code === 0)) {
+    await api.refreshPoints().catch(() => {});
+    const bal = api.pointsSnapshot().balance;
+    console.log(`[Points] ✅ 今日积分已领取（+100），余额 ${bal == null ? '未知' : bal}`);
+    writeClaimState({ ...state, last_claim_date: today(), last_balance: bal });
+    return;
+  }
+
+  // 领取接口返回非成功，复核是否已领（服务端幂等场景）
+  const dt2 = await api.dayTaskRaw().catch(() => null);
+  const acts2 = (dt2 && dt2.data && dt2.data.activity_data) || [];
+  const task2 = acts2.find((a) => (a.jump_url || '').includes('checkTask'));
+  if (task2 && task2.action_status === 'completed') {
+    console.log('[Points] 复核确认今日已领取，更新本地标记');
+    writeClaimState({ ...state, last_claim_date: today() });
+    return;
+  }
+  throw new Error('领取接口返回非成功：' + JSON.stringify(r).slice(0, 120));
+}
 
 async function ensureJwt() {
   const jwtFile = login.jwtPath();
@@ -75,6 +142,15 @@ async function ensureJwt() {
 async function main() {
   console.log('==== TeleAgent 保活 · 本轮开始 ' + new Date().toISOString() + ' ====');
 
+  // 随机抖动：把实际请求时刻打散，避免每轮都落在固定秒（机械心跳特征）。
+  // 基准间隔由外部 cron 控制在约 30 分钟，这里再叠加 0~N 秒随机延迟。
+  const jitterMax = Math.max(0, parseInt(process.env.TA_JITTER_SEC || '45', 10));
+  if (jitterMax > 0) {
+    const j = Math.floor(Math.random() * jitterMax) + 1;
+    console.log(`[Jitter] 随机延迟 ${j}s 后执行（打散固定时刻）`);
+    await sleep(j * 1000);
+  }
+
   let ins = await ensureJwt();
 
   // 自愈：实例关机/排队 → 远程拉起（即使休眠真的发生，也能最快恢复）
@@ -100,6 +176,13 @@ async function main() {
     }
   }
   if (!url) throw new Error('换票连续 3 次失败');
+
+  // 每日积分（独立于保活，失败不影响本轮结果）
+  try {
+    await maybeClaimPoints();
+  } catch (e) {
+    console.warn(`[Points] 本轮积分跳过（不影响保活）：${e.message}`);
+  }
 
   // 最终确认状态
   const finalIns = await ka.resolveInstance();
