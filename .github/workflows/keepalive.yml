@@ -38,8 +38,10 @@ jobs:
           # 滚动 key：每轮用当前 run_id 建新条目，保存最新状态
           key: teleagent-state-v2-${{ github.run_id }}
           # 前缀匹配恢复最近一次运行保存的状态
+          # v2 未建立时回退到旧 v1 缓存恢复 JWT，避免迁移期被迫重登
           restore-keys: |
             teleagent-state-v2-
+            teleagent-jwt-v1-
 
       - name: 执行一轮保活
         env:
