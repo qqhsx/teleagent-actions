@@ -27,20 +27,16 @@ jobs:
         with:
           node-version: '20'
 
-      - name: 恢复会话与积分状态缓存
+      - name: 恢复 JWT 缓存
         uses: actions/cache@v4
         with:
-          # jwt.txt 免重复登录；claim-state.json 保证每日积分只领一次
-          # 密码不落盘、不入缓存
-          path: |
-            data/jwt.txt
-            data/claim-state.json
-          # 滚动 key：每轮用当前 run_id 建新条目，保存最新状态
-          key: teleagent-state-v2-${{ github.run_id }}
-          # 前缀匹配恢复最近一次运行保存的状态
-          # v2 未建立时回退到旧 v1 缓存恢复 JWT，避免迁移期被迫重登
+          # 只缓存 jwt.txt 免重复登录；密码不落盘、不入缓存。
+          # 积分防重复靠服务端 checkTask 幂等（action_status=completed），
+          # 不依赖本地标记文件——故 path 保持单文件，历史 v1 缓存可直接恢复。
+          path: data/jwt.txt
+          key: teleagent-jwt-v1-${{ github.run_id }}
+          # 前缀匹配恢复最近一次运行保存的 JWT（含最新凭据）
           restore-keys: |
-            teleagent-state-v2-
             teleagent-jwt-v1-
 
       - name: 执行一轮保活
