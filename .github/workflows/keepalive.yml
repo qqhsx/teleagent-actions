@@ -1,13 +1,11 @@
 name: TeleAgent 云电脑保活
 
 on:
-  schedule:
-    # 每 25 分钟一轮（UTC）：休眠阈值 1 小时，留足余量给调度延迟与平台策略动态调整。
-    # 非整点间隔 + 脚本内 0~45s 随机抖动，降低机械心跳特征。
-    # 注：本机实测 GitHub 自带 schedule 曾出现平台级不触发，实际以外部 cron-job.org
-    #     调用 workflow_dispatch 为准；此处保留作双保险。
-    - cron: '*/25 * * * *'
-  workflow_dispatch: # 外部 cron-job.org 每 25 分钟调用一次 + 手动验证
+  # 调度全部交给外部 cron-job.org，通过 POST workflow_dispatch 触发。
+  # 已移除 GitHub 内置 schedule：cron '*/25' 在每小时 00/25/50 分触发，
+  # 50 分到下一小时 00 分只有 10 分钟，与 cron-job.org 叠加后间隔忽 25 忽 10，
+  # 反而制造了机械噪声。外部单一触发源 + 脚本内 0~45s 抖动即可。
+  workflow_dispatch: # cron-job.org 触发 + 手动验证
 
 # 防止上一轮没跑完就并发触发
 concurrency:
@@ -17,7 +15,9 @@ concurrency:
 jobs:
   keepalive:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    # 上限需覆盖「失败轮 + 3 分钟重试等待 + 补跑轮」最坏路径；
+    # 正常轮次按实际秒数计费，调高不影响额度。
+    timeout-minutes: 12
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
