@@ -190,7 +190,28 @@ async function main() {
   console.log('==== 本轮结束 ====');
 }
 
-main().catch((e) => {
-  console.error('❌ 保活失败：' + (e && e.message ? e.message : e));
+// 失败重试：一轮抛错后等待 N 秒再补跑一次，把最坏心跳空窗从「30+30=60 分钟」
+// 压到「30+3+约1=34 分钟」，远离平台 60 分钟休眠阈值。
+// 关键：只在失败时才触发等待，正常轮次零额外开销（不多耗 Actions 额度）。
+// 等待期间 job 仍占用 runner，故 timeout-minutes 需覆盖：两轮执行 + 一次等待。
+const RETRY_DELAY_SEC = Math.max(0, parseInt(process.env.TA_RETRY_DELAY_SEC || '180', 10));
+
+async function runWithRetry() {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      await main();
+      return; // 成功即结束，不重试
+    } catch (e) {
+      const msg = e && e.message ? e.message : String(e);
+      if (attempt >= 2) throw e; // 第二次仍失败，交给外层 exit(1)
+      console.warn(`[Retry] 第 1 次失败（${msg.slice(0, 120)}），${RETRY_DELAY_SEC}s 后补跑一次…`);
+      if (RETRY_DELAY_SEC > 0) await sleep(RETRY_DELAY_SEC * 1000);
+      console.log('[Retry] 开始补跑第 2 次…');
+    }
+  }
+}
+
+runWithRetry().catch((e) => {
+  console.error('❌ 保活失败（含 1 次重试）：' + (e && e.message ? e.message : e));
   process.exit(1);
 });
