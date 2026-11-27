@@ -27,18 +27,18 @@ jobs:
         with:
           node-version: '20'
 
-      - name: 恢复 JWT 缓存
-        id: cache-restore
-        uses: actions/cache/restore@v4
+      - name: 恢复 JWT 缓存（仅成功轮保存）
+        uses: actions/cache@v4
         with:
-          # 缓存整个 data/：账号1 的 jwt.txt + 账号2/3... 的 data/accN/jwt.txt。
-          # 密码不落盘、不入缓存。积分防重复靠服务端 checkTask 幂等。
-          # key 保留 v1 前缀，历史缓存可恢复（账号1 路径未变，仍为 data/jwt.txt）。
+          # 必须用一体式 actions/cache@v4：历史 20 份有效 JWT 都由它保存，
+          # 拆成 restore/save 两步后缓存 scope 不同，读不到历史缓存
+          # （2026-11-27 事故：拆分版 restore 全部 Cache not found → 每轮被迫重登 → 全线失败 → 云电脑关机）。
+          # save-if 守门：仅当脚本写出 .cache-ok（本轮至少 1 账号成功）才保存，失败轮不污染缓存。
           path: data/
           key: teleagent-jwt-v1-${{ github.run_id }}
-          # 前缀匹配恢复最近一次运行保存的 JWT（含最新凭据）
           restore-keys: |
             teleagent-jwt-v1-
+          save-if: ${{ hashFiles('data/.cache-ok') != '' }}
 
       - name: 执行一轮保活
         env:
@@ -56,12 +56,3 @@ jobs:
           TA_PASSWORD_5: ${{ secrets.TA_PASSWORD_5 }}
         run: node actions-keepalive.js
 
-      # 缓存守门：仅当脚本写出 .cache-ok（本轮至少 1 个账号成功）才保存。
-      # 整轮登录失败时 data/ 是空的/残缺的，绝不入缓存，避免污染后续轮次
-      # （2026-11-27 事故：失败轮空缓存被下轮命中 → 必然重登 → 连续失败）。
-      - name: 保存 JWT 缓存（仅成功轮）
-        if: hashFiles('data/.cache-ok') != ''
-        uses: actions/cache/save@v4
-        with:
-          path: data/
-          key: teleagent-jwt-v1-${{ github.run_id }}
