@@ -249,11 +249,27 @@ async function main() {
   }
 
   const failed = results.filter((r) => !r.ok);
-  console.log(`[汇总] 成功 ${results.length - failed.length}/${results.length} 个账号`);
+  const okCount = results.length - failed.length;
+  console.log(`[汇总] 成功 ${okCount}/${results.length} 个账号`);
   if (failed.length) {
-    // 关键：此处不 throw —— 让 job 以成功结束，确保 actions/cache 保存本轮更新后的 JWT。
-    // 否则某账号偶发失败会导致整个 job 失败，缓存无法保存，下轮被迫重登（更易触发异地风控）。
-    console.error(`[汇总] 失败账号：${failed.map((r) => '#' + r.id).join('、')}（本 job 仍以成功退出，以保存 JWT 缓存）`);
+    console.error(`[汇总] 失败账号：${failed.map((r) => '#' + r.id).join('、')}`);
+  }
+
+  // 缓存守门：只有当本轮至少一个账号成功（拿到了有效 JWT 并完成保活）时，
+  // 才写 .cache-ok 标记。workflow 的 cache save 步骤据此决定是否保存本轮 data/。
+  // 目的：杜绝"整轮登录失败 → 空/残缺 data 被存进缓存 → 下轮命中坏缓存 →
+  // 必然重新登录 → 再失败"的恶性循环（2026-11-27 实测事故）。
+  const marker = path.join(DATA_DIR, '.cache-ok');
+  try {
+    if (okCount > 0) {
+      fs.writeFileSync(marker, new Date().toISOString());
+      console.log('[Cache] 本轮有成功账号，写入缓存保存标记');
+    } else {
+      if (fs.existsSync(marker)) fs.unlinkSync(marker);
+      console.error('[Cache] 本轮全部账号失败，不写缓存标记（保留云端上一份有效 JWT）');
+    }
+  } catch (e) {
+    console.warn(`[Cache] 标记写入失败（不影响本轮）：${e.message}`);
   }
   console.log('==== 本轮结束 ====');
 }
