@@ -30,10 +30,10 @@ jobs:
       - name: 恢复 JWT 缓存
         uses: actions/cache@v4
         with:
-          # 只缓存 jwt.txt 免重复登录；密码不落盘、不入缓存。
-          # 积分防重复靠服务端 checkTask 幂等（action_status=completed），
-          # 不依赖本地标记文件——故 path 保持单文件，历史 v1 缓存可直接恢复。
-          path: data/jwt.txt
+          # 缓存整个 data/：账号1 的 jwt.txt + 账号2/3... 的 data/accN/jwt.txt。
+          # 密码不落盘、不入缓存。积分防重复靠服务端 checkTask 幂等。
+          # key 保留 v1 前缀，历史缓存可恢复（账号1 路径未变，仍为 data/jwt.txt）。
+          path: data/
           key: teleagent-jwt-v1-${{ github.run_id }}
           # 前缀匹配恢复最近一次运行保存的 JWT（含最新凭据）
           restore-keys: |
@@ -41,8 +41,18 @@ jobs:
 
       - name: 执行一轮保活
         env:
+          # 账号1（兼容旧命名）
           TA_ACCOUNT: ${{ secrets.TA_ACCOUNT }}
           TA_PASSWORD: ${{ secrets.TA_PASSWORD }}
+          # 账号2~5（按需增加，编号须连续；加账号只需加 Secrets，不用改本文件）
+          TA_ACCOUNT_2: ${{ secrets.TA_ACCOUNT_2 }}
+          TA_PASSWORD_2: ${{ secrets.TA_PASSWORD_2 }}
+          TA_ACCOUNT_3: ${{ secrets.TA_ACCOUNT_3 }}
+          TA_PASSWORD_3: ${{ secrets.TA_PASSWORD_3 }}
+          TA_ACCOUNT_4: ${{ secrets.TA_ACCOUNT_4 }}
+          TA_PASSWORD_4: ${{ secrets.TA_PASSWORD_4 }}
+          TA_ACCOUNT_5: ${{ secrets.TA_ACCOUNT_5 }}
+          TA_PASSWORD_5: ${{ secrets.TA_PASSWORD_5 }}
         run: node actions-keepalive.js
         # 缓存由 actions/cache 在 job 成功结束时自动保存：
         # 本轮若重登更新了 jwt.txt，新 JWT 会写入新的 run_id 缓存条目。
