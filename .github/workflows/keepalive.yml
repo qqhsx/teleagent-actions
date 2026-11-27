@@ -7,6 +7,10 @@ on:
   # 反而制造了机械噪声。外部单一触发源 + 脚本内 0~45s 抖动即可。
   workflow_dispatch: # cron-job.org 触发 + 手动验证
 
+permissions:
+  contents: read
+  actions: write # 允许每轮清理旧缓存，防止缓存条目无限膨胀
+
 # 防止上一轮没跑完就并发触发
 concurrency:
   group: teleagent-keepalive
@@ -27,18 +31,17 @@ jobs:
         with:
           node-version: '20'
 
-      - name: 恢复 JWT 缓存（仅成功轮保存）
-        uses: actions/cache@v4
+      - name: 恢复 JWT 缓存
+        id: cache-restore
+        uses: actions/cache/restore@v4
         with:
-          # 必须用一体式 actions/cache@v4：历史 20 份有效 JWT 都由它保存，
-          # 拆成 restore/save 两步后缓存 scope 不同，读不到历史缓存
-          # （2026-11-27 事故：拆分版 restore 全部 Cache not found → 每轮被迫重登 → 全线失败 → 云电脑关机）。
-          # save-if 守门：仅当脚本写出 .cache-ok（本轮至少 1 账号成功）才保存，失败轮不污染缓存。
+          # 缓存整个 data/：账号1 的 jwt.txt + 账号2/3... 的 data/accN/jwt.txt。
+          # 密码不落盘、不入缓存。积分防重复靠服务端 checkTask 幂等。
+          # key 用 run_id 保证每轮可写入新条目；下方每轮清理旧条目，稳定控制在 6 个内。
           path: data/
           key: teleagent-jwt-v1-${{ github.run_id }}
           restore-keys: |
             teleagent-jwt-v1-
-          save-if: ${{ hashFiles('data/.cache-ok') != '' }}
 
       - name: 执行一轮保活
         env:
@@ -56,3 +59,29 @@ jobs:
           TA_PASSWORD_5: ${{ secrets.TA_PASSWORD_5 }}
         run: node actions-keepalive.js
 
+      # 守门：仅当脚本写出 .cache-ok（本轮至少 1 账号成功）才保存。
+      # 用 actions/cache/save@v4 + if 条件（save-if 不是合法参数，2026-11-27 踩坑）。
+      # 失败轮绝不保存 data/，避免空/残缺 JWT 入缓存污染后续轮次。
+      - name: 保存 JWT 缓存（仅成功轮）
+        if: hashFiles('data/.cache-ok') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: data/
+          key: teleagent-jwt-v1-${{ github.run_id }}
+
+      # 每轮清理旧缓存，只保留最近 6 个（含本轮刚保存的）。
+      # 根因：此前每轮用 run_id 建新 key 却从不删除，累积到 349 个，
+      # GitHub 超限后 restore 直接 Cache not found → 每轮被迫重登 → 境外 IP 拿不到
+      # operationToken → 保活全线失败 → 云电脑关机（2026-11-27 事故）。
+      - name: 清理旧缓存（保留最近 6 个）
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CACHES=$(gh api "repos/${{ github.repository }}/actions/caches?per_page=100" \
+            --jq '.actions_caches | sort_by(.created_at) | reverse | .[] | "\(.id) \(.key)"' 2>/dev/null || true)
+          echo "$CACHES" | tail -n +7 | while read -r id key; do
+            [ -z "$id" ] && continue
+            gh api -X DELETE "repos/${{ github.repository }}/actions/caches/$id" >/dev/null 2>&1 && echo "已删旧缓存 $key" || true
+          done
+          echo "剩余缓存数: $(echo "$CACHES" | grep -c . || echo 0)"
