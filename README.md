@@ -92,7 +92,7 @@ Actions 页面 → "TeleAgent 云电脑保活" → **Run workflow** 手动触发
 
 ## 已知限制
 
-1. **境外 IP 风控**：GitHub 托管 runner 出口在境外，JWT 失效后重新登录时可能被判定异地（滑块/operationToken 失败）。缓解：JWT 复用天数内不重登 + 失败重试；偶发一轮失败，下一轮缓存恢复后自愈。若持续被拦，只能换国内自托管 runner。
+1. **境外 IP 风控**：GitHub 托管 runner 出口在境外，JWT 失效后重新登录时可能被判定异地。缓解：JWT 复用天数内不重登 + 失败重试。早期反复出现的 `跳转链未拿到 operationToken` 并非风控，而是回跳响应同时下发一条有效 `operationToken` 和两条空值清理 cookie，扁平化解析时真值被空值覆盖；现已优先保留非空 JWT。若仍持续被拦，只能换国内自托管 runner。
 2. **调度延迟**：cron-job.org 高峰可能延迟；`concurrency` 防并发 + 失败重试兜底。
 3. **额度**：Public 仓库不限；Private 仓库每账号约 1440 分钟/月，多账号会超额。
 4. **合规**：这是对平台回收策略的对抗性使用，且涉及积分接口，请自行评估账号风险。
