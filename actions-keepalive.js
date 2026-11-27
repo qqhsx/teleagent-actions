@@ -253,6 +253,9 @@ async function main() {
   console.log(`[汇总] 成功 ${okCount}/${results.length} 个账号`);
   if (failed.length) {
     console.error(`[汇总] 失败账号：${failed.map((r) => '#' + r.id).join('、')}`);
+    // 让 Actions 如实显示 failure，避免“全账号失败仍然绿灯”掩盖事故。
+    // cleanup/缓存步骤使用 if: always()/独立条件，不受退出码影响。
+    process.exitCode = 1;
   }
 
   // 缓存守门：只有当本轮至少一个账号成功（拿到了有效 JWT 并完成保活）时，
